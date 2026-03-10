@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IDS — Windows Log Intrusion Detection System</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+
+    <!-- ═══ Sidebar ═══ -->
+    <nav class="sidebar">
+        <div class="logo">🛡️</div>
+        <ul class="nav-links">
+            <li><a href="#" class="active" data-page="dashboard" onclick="navigateTo('dashboard',this)">
+                    📊 <span class="tooltip">Dashboard</span>
+                </a></li>
+            <li><a href="#" data-page="alerts" onclick="navigateTo('alerts',this)">
+                    🔔 <span class="tooltip">Alerts</span>
+                </a></li>
+                    </ul>
+    </nav>
+
+    <!-- ═══ Main Wrapper ═══ -->
+    <div class="main-wrapper">
+
+        <!-- ─── Top Header ─── -->
+        <header class="top-header">
+            <div class="title"><span>IDS</span> — Windows Log Intrusion Detection System</div>
+            <div class="header-controls">
+                <div class="host-badge">
+                    Host: <strong id="host-name">Loading...</strong>
+                </div>
+                <div class="live-badge">
+                    <div class="live-dot"></div>
+                    Live Monitoring
+                </div>
+                <div class="last-scan" id="last-updated">Last Log Scan: —</div>
+                <input type="text" class="header-input" id="search" placeholder="🔍 Search alerts..."
+                    oninput="renderTable()" />
+                <select class="header-select" id="filter-severity" onchange="renderTable()">
+                    <option value="">All Severities</option>
+                    <option value="CRITICAL">Critical</option>
+                    <option value="HIGH">High</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="LOW">Low</option>
+                    <option value="INFO">Info</option>
+                </select>
+                <select class="header-select" id="filter-channel" onchange="renderTable()">
+                    <option value="">All Channels</option>
+                    <option value="Security">Security</option>
+                    <option value="Application">Application</option>
+                    <option value="System">System</option>
+                </select>
+                <button class="btn-clear" onclick="clearAlerts()">Clear Alerts</button>
+            </div>
+        </header>
+
+        <!-- ═══════════════════════════════════════
+         PAGE: Dashboard
+         ═══════════════════════════════════════ -->
+        <section id="page-dashboard" class="page-content page-section active">
+
+            <!-- Stats Row -->
+            <div class="stats-row">
+                <div class="stat-card total">
+                    <div class="number" id="stat-total">0</div>
+                    <div class="label">Total Alerts</div>
+                </div>
+                <div class="stat-card critical">
+                    <div class="number" id="stat-critical">0</div>
+                    <div class="label">Critical</div>
+                </div>
+                <div class="stat-card high">
+                    <div class="number" id="stat-high">0</div>
+                    <div class="label">High</div>
+                </div>
+                <div class="stat-card medium">
+                    <div class="number" id="stat-medium">0</div>
+                    <div class="label">Medium</div>
+                </div>
+                <div class="stat-card low">
+                    <div class="number" id="stat-low">0</div>
+                    <div class="label">Low</div>
+                </div>
+            </div>
+
+            <!-- Dashboard 3-column Grid -->
+            <div class="dashboard-grid">
+
+                <!-- Col 1, Row 1: Severity Donut -->
+                <div class="card">
+                    <h3>Attack Severity Distribution</h3>
+                    <canvas id="donutChart"></canvas>
+                </div>
+
+                <!-- Col 2, Row 1: Alerts Over Time -->
+                <div class="card">
+                    <h3>Alerts Over Time</h3>
+                    <canvas id="lineChart"></canvas>
+                </div>
+
+                <!-- Col 3, spans 2 rows: Investigation Panel -->
+                <div class="investigation-panel" id="investigation-panel">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+                        <h3 style="margin: 0;">🔎 Alert Investigation</h3>
+                        <span class="close" onclick="closeInvestigationPanel()" style="font-size: 24px; cursor: pointer; color: var(--text-muted);">&times;</span>
+                    </div>
+                    <div class="empty-investigation" id="inv-empty">
+                        <div class="icon">🕵️</div>
+                        <p>Click an alert row to investigate</p>
+                    </div>
+                    <div id="inv-content" style="display:none;">
+                        <!-- Filled by JS -->
+                    </div>
+                </div>
+
+                <!-- Col 1, Row 2: Top Targeted Users -->
+                <div class="card">
+                    <h3>Top Targeted Users</h3>
+                    <ul class="top-users-list" id="top-users"></ul>
+                </div>
+
+                <!-- Col 2, Row 2: Attack Types -->
+                <div class="card">
+                    <h3>Attack Types Detected</h3>
+                    <canvas id="attackTypesChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Alert Table -->
+            <div class="table-section">
+                <h3>Security Alerts</h3>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Event ID</th>
+                                <th>Severity</th>
+                                <th>Risk Score</th>
+                                <th>Username</th>
+                                <th>IP Address</th>
+                                <th>Channel</th>
+                                <th>Source</th>
+                                <th>Time</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody id="alert-body">
+                            <tr>
+                                <td colspan="9">
+                                    <div class="empty">
+                                        <span class="icon">📡</span>
+                                        Waiting for alerts...
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- ═══════════════════════════════════════
+         PAGE: Alerts (full-page table view)
+         ═══════════════════════════════════════ -->
+        <section id="page-alerts" class="page-content page-section">
+            <div class="table-section">
+                <h3>All Security Alerts</h3>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Event ID</th>
+                                <th>Severity</th>
+                                <th>Risk Score</th>
+                                <th>Reason</th>
+                                <th>Username</th>
+                                <th>IP Address</th>
+                                <th>Channel</th>
+                                <th>Source</th>
+                                <th>Computer</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="alert-body-full">
+                            <tr>
+                                <td colspan="10">
+                                    <div class="empty">
+                                        <span class="icon">📡</span>
+                                        Waiting for alerts...
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Investigation Panel for Alerts Page -->
+        <div class="investigation-panel" id="investigation-panel-alerts">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+                <h3 style="margin: 0;">🔎 Alert Investigation</h3>
+                <span class="close" onclick="closeInvestigationPanel()" style="font-size: 24px; cursor: pointer; color: var(--text-muted);">&times;</span>
+            </div>
+            <div class="empty-investigation" id="inv-empty-alerts">
+                <div class="icon">🕵️</div>
+                <p>Click an alert row to investigate</p>
+            </div>
+            <div id="inv-content-alerts" style="display:none;">
+                <!-- Filled by JS -->
+            </div>
+        </div>
+
+        
+    </div><!-- /main-wrapper -->
+
+    <!-- Event Details Modal -->
+    <div id="eventModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔎 Event Details</h3>
+                <span class="close" onclick="closeEventModal()">&times;</span>
+            </div>
+            <div class="modal-body" id="modal-body">
+                <!-- Content will be populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+</body>
+
+</html>

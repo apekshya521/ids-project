@@ -9,8 +9,8 @@ logger = logging.getLogger("ids.detector")
 user_sessions = defaultdict(list)
 
 def detect(log):
-    username = log.get("username", "unknown")
-    if username != "unknown":
+    username = log.get("username", "N/A")
+    if username != "N/A":
         now = datetime.datetime.now()
         user_sessions[username].append(now)
         

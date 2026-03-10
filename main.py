@@ -56,12 +56,14 @@ async def poll_logs():
                             "ip_address":  scored["ip_address"],
                             "computer":    scored["computer"],
                             "channel":     scored["channel"],
+                            "source":      scored["source"],
                             "time":        scored["time"],
                             "risk_level":  scored["risk_level"],
                             "severity":    scored["severity"],
                             "risk_score":  scored["risk_score"],
                             "reason":      scored["reason"],
-                            "mitigation":  scored["mitigation"]
+                            "mitigation":  scored.get("mitigation", ""),
+                            "raw_data":    scored.get("raw_data", "[]")
                         }
                         
                         # save_alert returns True if inserted (not duplicate)
@@ -94,8 +96,8 @@ async def lifespan(app: FastAPI):
 
 # ── App Definition ────────────────────────
 app = FastAPI(title="IDS - Windows Log Monitor", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
+templates = Jinja2Templates(directory="frontend/templates")
 
 # Restrict CORS in production, generic for now
 app.add_middleware(

@@ -81,6 +81,7 @@ def init_db():
                 risk_score  INTEGER,
                 severity    TEXT,
                 mitigation  TEXT,
+                raw_data    TEXT,
                 created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -107,6 +108,14 @@ def init_db():
             cursor.execute("ALTER TABLE alerts ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP")
             logger.info("Added 'created_at' column to alerts")
 
+        if not _column_exists(cursor, "alerts", "raw_data"):
+            cursor.execute("ALTER TABLE alerts ADD COLUMN raw_data TEXT")
+            logger.info("Added 'raw_data' column to alerts")
+
+        if not _column_exists(cursor, "alerts", "source"):
+            cursor.execute("ALTER TABLE alerts ADD COLUMN source TEXT")
+            logger.info("Added 'source' column to alerts")
+
         conn.commit()
     logger.info("Database ready!")
 
@@ -129,8 +138,8 @@ def save_alert(alert):
             INSERT INTO alerts
             (event_id, description, channel, time, computer,
              username, ip_address, reason, risk_level, risk_score,
-             severity, mitigation)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+             severity, mitigation, raw_data, source)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             alert.get("event_id"),
             alert.get("description"),
@@ -143,7 +152,9 @@ def save_alert(alert):
             alert.get("risk_level"),
             alert.get("risk_score"),
             alert.get("severity"),
-            alert.get("mitigation")
+            alert.get("mitigation"),
+            alert.get("raw_data", "[]"),
+            alert.get("source")
         ))
         conn.commit()
         return True

@@ -7,12 +7,12 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = os.getenv("IDS_DB_PATH", str(BASE_DIR / "ids.db"))
 
-# Application Settings
-POLL_INTERVAL = int(os.getenv("IDS_POLL_INTERVAL", 10))
+# Application Configuration
+POLL_INTERVAL = 10
 CHANNELS = ["Security", "Application", "System"]
 
 # Logging Configuration
-LOG_LEVEL = os.getenv("IDS_LOG_LEVEL", "INFO").upper()
+LOG_LEVEL = "INFO"
 
 def setup_logging():
     logging.basicConfig(

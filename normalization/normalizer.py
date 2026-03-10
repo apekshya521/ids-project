@@ -14,6 +14,7 @@ def normalize(log):
         "channel":     log["channel"],
         "time":        log["time"],
         "computer":    log["computer"],
-        "username":    log.get("username", "unknown"),
-        "ip_address":  log.get("ip_address", "local"),
+        "source":      log["source"],
+        "username":    log.get("username", "N/A"),
+        "ip_address":  log.get("ip_address", "N/A"),
     }
