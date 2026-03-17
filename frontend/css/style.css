@@ -318,6 +318,20 @@ body {
     color: var(--color-low);
 }
 
+/* Clickable stat cards */
+.clickable-card {
+    cursor: pointer;
+}
+
+.clickable-card:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.clickable-card:active {
+    transform: translateY(0) scale(0.98);
+}
+
 /* ══════════════════════════════════════════
    DASHBOARD CARDS (Glassmorphism)
    ══════════════════════════════════════════ */
@@ -375,6 +389,32 @@ body {
     transition: background 0.15s ease;
 }
 
+/* Remove white background from all table elements */
+.table,
+.table th,
+.table td,
+.table-striped tbody tr:nth-of-type(odd) {
+    background: transparent !important;
+}
+
+/* Remove white background from alerts toolbar */
+.alerts-toolbar {
+    background: transparent !important;
+}
+
+.alerts-toolbar .form-control,
+.alerts-toolbar .form-select {
+    background: rgba(15, 22, 41, 0.9) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    color: #e2e8f0 !important;
+}
+
+.alerts-toolbar .input-group-text {
+    background: rgba(15, 22, 41, 0.9) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    color: #e2e8f0 !important;
+}
+
 .table tbody tr:hover {
     background: rgba(59, 130, 246, 0.06) !important;
 }
@@ -383,6 +423,23 @@ body {
     padding: 10px 12px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     vertical-align: middle;
+}
+
+/* Table column widths for better visibility */
+#alerts-table th:nth-child(1) { width: 80px; }  /* Event ID */
+#alerts-table th:nth-child(2) { width: 90px; }  /* Severity */
+#alerts-table th:nth-child(3) { width: 90px; }  /* Risk Score */
+#alerts-table th:nth-child(4) { width: 300px; } /* Description */
+#alerts-table th:nth-child(5) { width: 120px; } /* Username */
+#alerts-table th:nth-child(6) { width: 120px; } /* IP Address */
+#alerts-table th:nth-child(7) { width: 90px; }  /* Channel */
+#alerts-table th:nth-child(8) { width: 100px; } /* Source */
+#alerts-table th:nth-child(9) { width: 120px; } /* Computer */
+#alerts-table th:nth-child(10) { width: 140px; } /* Time */
+
+/* Ensure table doesn't overflow */
+.table-responsive {
+    overflow-x: auto;
 }
 
 /* Severity row coloring */

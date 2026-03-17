@@ -98,28 +98,40 @@ def read_logs(channel, after_record=0):
 
     try:
         # Open connection to Windows Event Log
-        log   = win32evtlog.OpenEventLog("localhost", channel)
-        flags = (win32evtlog.EVENTLOG_BACKWARDS_READ |
-                 win32evtlog.EVENTLOG_SEQUENTIAL_READ)
-        events = win32evtlog.ReadEventLog(log, flags, 0)
-
+        log = win32evtlog.OpenEventLog("localhost", channel)
+        
+        # Get the oldest and newest record numbers
+        oldest = win32evtlog.GetOldestEventLogRecord(log)
+        newest = win32evtlog.GetNumberOfEventLogRecords(log) + oldest - 1
+        
+        # If we have a starting point, only read newer records
+        if after_record > 0:
+            start_pos = max(after_record + 1, oldest)
+        else:
+            start_pos = oldest
+        
+        # Read backwards from newest to avoid duplicates
+        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+        events = win32evtlog.ReadEventLog(log, flags, start_pos)
+        
         for event in events:
             record_id = event.RecordNumber
-            event_id  = event.EventID & 0xFFFF
-            inserts   = list(event.StringInserts) if event.StringInserts else []
+            event_id = event.EventID & 0xFFFF
+            inserts = list(event.StringInserts) if event.StringInserts else []
 
-            # Stop when we hit already processed events
+            # Only process events newer than our last record
             if record_id <= after_record:
-                break
+                continue
 
             # Extract all fields
-            username   = extract_username(event_id, inserts)
+            username = extract_username(event_id, inserts)
             ip_address = extract_ip(event_id, inserts)
-            computer   = extract_computer(event)
-            timestamp  = extract_timestamp(event)
-            raw_data   = extract_raw_message(event, channel, inserts)
+            computer = extract_computer(event)
+            timestamp = extract_timestamp(event)
+            raw_data = extract_raw_message(event, channel, inserts)
 
             logs.append({
+                "record_id":  record_id,
                 "event_id":   event_id,
                 "channel":    channel,
                 "time":       timestamp,
@@ -127,7 +139,6 @@ def read_logs(channel, after_record=0):
                 "username":   username,
                 "ip_address": ip_address,
                 "source":     event.SourceName if event.SourceName else "Unknown"
-                
             })
 
         win32evtlog.CloseEventLog(log)

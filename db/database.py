@@ -116,48 +116,45 @@ def init_db():
             cursor.execute("ALTER TABLE alerts ADD COLUMN source TEXT")
             logger.info("Added 'source' column to alerts")
 
+        # Drop unique index to allow events with same ID but different timestamps
+        cursor.execute("DROP INDEX IF EXISTS idx_alert_unique")
+        logger.info("Dropped unique index to allow duplicate events")
+
         conn.commit()
     logger.info("Database ready!")
 
 
 def save_alert(alert):
     with get_connection() as conn:
-        # ── Deduplication Check ──────────────────
-        duplicate = conn.execute("""
-            SELECT id FROM alerts 
-            WHERE event_id = ? AND username = ? AND channel = ? 
-            AND created_at >= datetime('now', '-60 seconds')
-            LIMIT 1
-        """, (alert.get("event_id"), alert.get("username"), alert.get("channel"))).fetchone()
-        
-        if duplicate:
-            logger.debug(f"Skipping duplicate alert: {alert.get('event_id')} for {alert.get('username')}")
+        # No deduplication check - allow all events with different timestamps
+        try:
+            conn.execute("""
+                INSERT INTO alerts
+                (event_id, description, channel, time, computer,
+                 username, ip_address, reason, risk_level, risk_score,
+                 severity, mitigation, raw_data, source)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                alert.get("event_id"),
+                alert.get("description"),
+                alert.get("channel"),
+                alert.get("time"),
+                alert.get("computer"),
+                alert.get("username"),
+                alert.get("ip_address"),
+                alert.get("reason"),
+                alert.get("risk_level"),
+                alert.get("risk_score"),
+                alert.get("severity"),
+                alert.get("mitigation"),
+                alert.get("raw_data", "[]"),
+                alert.get("source")
+            ))
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError as e:
+            logger.debug(f"Duplicate alert skipped: {alert.get('event_id')} for {alert.get('username')} - {e}")
             return False
-
-        conn.execute("""
-            INSERT INTO alerts
-            (event_id, description, channel, time, computer,
-             username, ip_address, reason, risk_level, risk_score,
-             severity, mitigation, raw_data, source)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            alert.get("event_id"),
-            alert.get("description"),
-            alert.get("channel"),
-            alert.get("time"),
-            alert.get("computer"),
-            alert.get("username"),
-            alert.get("ip_address"),
-            alert.get("reason"),
-            alert.get("risk_level"),
-            alert.get("risk_score"),
-            alert.get("severity"),
-            alert.get("mitigation"),
-            alert.get("raw_data", "[]"),
-            alert.get("source")
-        ))
-        conn.commit()
-        return True
 
 
 def get_alerts(limit=500):

@@ -45,7 +45,10 @@ async def poll_logs():
                     detected = detect(clean)
                     scored   = calculate_score(detected)
 
-                    # Only store suspicious events
+                    # Send ALL events to WebSocket for real-time display
+                    await alert_manager.dispatch(scored)
+
+                    # Only store suspicious events in database
                     if scored["is_suspicious"]:
                         # Prepare alert object
                         alert_data = {

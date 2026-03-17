@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const timeLabels = [];
     const timeCounts = [];
     let currentPage = 1;
-    const alertsPerPage = 20;
+    const alertsPerPage = 1000;
 
     // ── DOM Elements ─────────────────────────
     const investigationModal = new bootstrap.Modal(document.getElementById('investigationModal'));
@@ -66,6 +66,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 sidebar.classList.toggle('show');
             });
         }
+
+        // Stat cards click handlers - navigate to alerts with filter
+        document.querySelectorAll('.clickable-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const severity = card.dataset.severity;
+                severityFilter.value = severity;
+                currentPage = 1;
+                navigateTo('alerts', document.getElementById('nav-alerts'));
+                renderAllTables();
+            });
+        });
     }
 
     // ── WebSocket ─────────────────────────────
@@ -74,8 +85,27 @@ document.addEventListener('DOMContentLoaded', () => {
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (data.type === "NEW_ALERT") {
-                console.log("New Live Alert:", data.alert);
-                fetchAlerts();
+                console.log("New Live Event:", data.alert);
+                
+                // Check for duplicate (same event_id and time)
+                const isDuplicate = allAlerts.some(existing => 
+                    existing.event_id === data.alert.event_id && 
+                    existing.time === data.alert.time
+                );
+                
+                if (!isDuplicate) {
+                    // Add event to the beginning of allAlerts array
+                    allAlerts.unshift(data.alert);
+                    // Limit to 1000 most recent events
+                    if (allAlerts.length > 1000) {
+                        allAlerts.pop();
+                    }
+                    // Update all tables and charts
+                    renderAllTables();
+                    updateStats();
+                } else {
+                    console.log("Skipping duplicate event:", data.alert.event_id, data.alert.time);
+                }
             }
         };
         ws.onerror = () => console.warn("WebSocket error");
@@ -115,7 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchAlerts() {
         try {
             const [alertRes, statsRes] = await Promise.all([
-                fetch("/api/alerts"),
+                fetch("/api/alerts?limit=500"),
                 fetch("/api/stats")
             ]);
 
@@ -210,8 +240,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderAllTables() {
         const filtered = getFilteredAlerts();
-        renderDashboardTable(filtered.filter(a => a.severity !== "INFO").slice(0, 10));
-        renderFullTable(filtered);
+        renderDashboardTable(allAlerts.filter(a => a.severity !== "INFO"));
+        renderFullTable(filtered);  // Keep filters for alerts page
     }
 
     // ── Dashboard Recent Alerts Table ────────
@@ -377,6 +407,29 @@ document.addEventListener('DOMContentLoaded', () => {
     //  CHARTS
     // ══════════════════════════════════════════
 
+    function updateStats() {
+        // Recalculate stats from allAlerts
+        const stats = {
+            total: allAlerts.length,
+            critical: allAlerts.filter(a => a.severity === 'CRITICAL').length,
+            high: allAlerts.filter(a => a.severity === 'HIGH').length,
+            medium: allAlerts.filter(a => a.severity === 'MEDIUM').length,
+            low: allAlerts.filter(a => a.severity === 'LOW').length
+        };
+        
+        // Update stat cards
+        document.getElementById('stat-total').textContent = stats.total;
+        document.getElementById('stat-critical').textContent = stats.critical;
+        document.getElementById('stat-high').textContent = stats.high;
+        document.getElementById('stat-medium').textContent = stats.medium;
+        document.getElementById('stat-low').textContent = stats.low;
+        
+        // Update charts
+        updateDonut(stats);
+        updateLine(stats.total);
+        updateTopUsers(allAlerts);
+    }
+
     // ── Donut Chart ──────────────────────────
     function updateDonut(stats) {
         const ctx = document.getElementById("donutChart").getContext("2d");
@@ -405,7 +458,25 @@ document.addEventListener('DOMContentLoaded', () => {
                         labels: {
                             color: "#8899aa", font: { size: 12, family: "'Inter', sans-serif" },
                             padding: 16, usePointStyle: true, pointStyle: "circle"
+                        },
+                        onClick: (e, legendItem) => {
+                            const severityMap = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
+                            const severity = severityMap[legendItem.index];
+                            severityFilter.value = severity;
+                            currentPage = 1;
+                            navigateTo('alerts', document.getElementById('nav-alerts'));
+                            renderAllTables();
                         }
+                    }
+                },
+                onClick: (e, elements) => {
+                    if (elements.length > 0) {
+                        const severityMap = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
+                        const severity = severityMap[elements[0].index];
+                        severityFilter.value = severity;
+                        currentPage = 1;
+                        navigateTo('alerts', document.getElementById('nav-alerts'));
+                        renderAllTables();
                     }
                 },
                 cutout: "68%",
