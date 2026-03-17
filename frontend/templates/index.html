@@ -1,238 +1,395 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="dark">
 
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>IDS — Windows Log Intrusion Detection System</title>
+    <title>Windows Intrusion Detection System</title>
+    <meta name="description"
+        content="Real-time Windows log intrusion detection system with advanced threat monitoring and alert management." />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="/static/css/style.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body>
-
-    <!-- ═══ Sidebar ═══ -->
-    <nav class="sidebar">
-        <div class="logo">🛡️</div>
-        <ul class="nav-links">
-            <li><a href="#" class="active" data-page="dashboard" onclick="navigateTo('dashboard',this)">
-                    📊 <span class="tooltip">Dashboard</span>
-                </a></li>
-            <li><a href="#" data-page="alerts" onclick="navigateTo('alerts',this)">
-                    🔔 <span class="tooltip">Alerts</span>
-                </a></li>
-                    </ul>
-    </nav>
-
-    <!-- ═══ Main Wrapper ═══ -->
-    <div class="main-wrapper">
-
-        <!-- ─── Top Header ─── -->
-        <header class="top-header">
-            <div class="title"><span>IDS</span> — Windows Log Intrusion Detection System</div>
-            <div class="header-controls">
-                <div class="host-badge">
-                    Host: <strong id="host-name">Loading...</strong>
+    <div class="d-flex">
+        <!-- ═══════════════════════════════════════
+             SIDEBAR NAVIGATION
+             ═══════════════════════════════════════ -->
+        <nav id="sidebar" class="sidebar d-flex flex-column">
+            <!-- Brand -->
+            <div class="sidebar-brand">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="brand-text" style="font-size: 1.15rem;">IDS</span>
                 </div>
-                <div class="live-badge">
+            </div>
+
+            <!-- Navigation Links -->
+            <ul class="nav flex-column sidebar-nav">
+                <li class="nav-item">
+                    <a href="#" class="nav-link active" data-page="dashboard" id="nav-dashboard">
+                        <i class="bi bi-grid-1x2-fill"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-page="alerts" id="nav-alerts">
+                        <i class="bi bi-bell-fill"></i>
+                        <span>Alerts</span>
+                        <span class="badge bg-danger ms-auto alert-count-badge" id="sidebar-alert-count"
+                            style="display:none;">0</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-page="logs" id="nav-logs">
+                        <i class="bi bi-journal-text"></i>
+                        <span>Logs</span>
+                    </a>
+                </li>
+            </ul>
+
+            <!-- Sidebar Footer -->
+            <div class="sidebar-footer mt-auto">
+                <div class="d-flex align-items-center gap-2 px-3 py-2">
                     <div class="live-dot"></div>
-                    Live Monitoring
+                    <small class="text-success fw-semibold">Monitoring Active</small>
                 </div>
-                <div class="last-scan" id="last-updated">Last Log Scan: —</div>
-                <input type="text" class="header-input" id="search" placeholder="🔍 Search alerts..."
-                    oninput="renderTable()" />
-                <select class="header-select" id="filter-severity" onchange="renderTable()">
-                    <option value="">All Severities</option>
-                    <option value="CRITICAL">Critical</option>
-                    <option value="HIGH">High</option>
-                    <option value="MEDIUM">Medium</option>
-                    <option value="LOW">Low</option>
-                    <option value="INFO">Info</option>
-                </select>
-                <select class="header-select" id="filter-channel" onchange="renderTable()">
-                    <option value="">All Channels</option>
-                    <option value="Security">Security</option>
-                    <option value="Application">Application</option>
-                    <option value="System">System</option>
-                </select>
-                <button class="btn-clear" onclick="clearAlerts()">Clear Alerts</button>
             </div>
-        </header>
+        </nav>
 
         <!-- ═══════════════════════════════════════
-         PAGE: Dashboard
-         ═══════════════════════════════════════ -->
-        <section id="page-dashboard" class="page-content page-section active">
-
-            <!-- Stats Row -->
-            <div class="stats-row">
-                <div class="stat-card total">
-                    <div class="number" id="stat-total">0</div>
-                    <div class="label">Total Alerts</div>
-                </div>
-                <div class="stat-card critical">
-                    <div class="number" id="stat-critical">0</div>
-                    <div class="label">Critical</div>
-                </div>
-                <div class="stat-card high">
-                    <div class="number" id="stat-high">0</div>
-                    <div class="label">High</div>
-                </div>
-                <div class="stat-card medium">
-                    <div class="number" id="stat-medium">0</div>
-                    <div class="label">Medium</div>
-                </div>
-                <div class="stat-card low">
-                    <div class="number" id="stat-low">0</div>
-                    <div class="label">Low</div>
-                </div>
-            </div>
-
-            <!-- Dashboard 3-column Grid -->
-            <div class="dashboard-grid">
-
-                <!-- Col 1, Row 1: Severity Donut -->
-                <div class="card">
-                    <h3>Attack Severity Distribution</h3>
-                    <canvas id="donutChart"></canvas>
+             MAIN CONTENT AREA
+             ═══════════════════════════════════════ -->
+        <div class="main-content flex-grow-1">
+            <!-- ─── Top Header Bar ─── -->
+            <header class="top-header d-flex align-items-center justify-content-between position-relative pe-3">
+                <div class="d-flex align-items-center gap-3">
+                    <button class="btn btn-sm btn-outline-secondary d-lg-none" id="sidebar-toggle" type="button">
+                        <i class="bi bi-list fs-5"></i>
+                    </button>
+                    <h1 class="header-title" id="page-title">Dashboard</h1>
                 </div>
 
-                <!-- Col 2, Row 1: Alerts Over Time -->
-                <div class="card">
-                    <h3>Alerts Over Time</h3>
-                    <canvas id="lineChart"></canvas>
+                <!-- Centered Main Title -->
+                <div class="position-absolute start-50 translate-middle-x d-none d-xl-block text-center pe-5 me-5" style="white-space: nowrap; z-index: 10;">
+                    <span class="fs-4 me-1">🛡️</span>
+                    <span class="fw-bold fs-5 align-middle" style="background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: 0.5px;">Windows Intrusion Detection System</span>
                 </div>
 
-                <!-- Col 3, spans 2 rows: Investigation Panel -->
-                <div class="investigation-panel" id="investigation-panel">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
-                        <h3 style="margin: 0;">🔎 Alert Investigation</h3>
-                        <span class="close" onclick="closeInvestigationPanel()" style="font-size: 24px; cursor: pointer; color: var(--text-muted);">&times;</span>
+                <div class="d-flex align-items-center gap-3 ms-auto position-relative" style="z-index: 20;">
+                    <div class="header-badge">
+                        <i class="bi bi-pc-display"></i>
+                        Host: <strong id="host-name">Loading...</strong>
                     </div>
-                    <div class="empty-investigation" id="inv-empty">
-                        <div class="icon">🕵️</div>
-                        <p>Click an alert row to investigate</p>
+                    <div class="header-badge badge-live">
+                        <div class="live-dot"></div>
+                        Live
                     </div>
-                    <div id="inv-content" style="display:none;">
-                        <!-- Filled by JS -->
+                    <small class="text-muted" id="last-updated">Last Scan: —</small>
+                </div>
+            </header>
+
+            <!-- ═══════════════════════════════════
+                 PAGE: DASHBOARD
+                 ═══════════════════════════════════ -->
+            <section id="page-dashboard" class="page-section active">
+                <!-- Stat Cards Row -->
+                <div class="row g-3 mb-4">
+                    <div class="col-xl col-md-4 col-6">
+                        <div class="stat-card stat-total">
+                            <div class="stat-icon"><i class="bi bi-shield-exclamation"></i></div>
+                            <div>
+                                <div class="stat-value" id="stat-total">0</div>
+                                <div class="stat-label">Total Alerts</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-xl col-md-4 col-6">
+                        <div class="stat-card stat-critical">
+                            <div class="stat-icon"><i class="bi bi-exclamation-octagon-fill"></i></div>
+                            <div>
+                                <div class="stat-value" id="stat-critical">0</div>
+                                <div class="stat-label">Critical</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-xl col-md-4 col-6">
+                        <div class="stat-card stat-high">
+                            <div class="stat-icon"><i class="bi bi-exclamation-triangle-fill"></i></div>
+                            <div>
+                                <div class="stat-value" id="stat-high">0</div>
+                                <div class="stat-label">High</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-xl col-md-4 col-6">
+                        <div class="stat-card stat-medium">
+                            <div class="stat-icon"><i class="bi bi-info-circle-fill"></i></div>
+                            <div>
+                                <div class="stat-value" id="stat-medium">0</div>
+                                <div class="stat-label">Medium</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-xl col-md-4 col-6">
+                        <div class="stat-card stat-low">
+                            <div class="stat-icon"><i class="bi bi-check-circle-fill"></i></div>
+                            <div>
+                                <div class="stat-value" id="stat-low">0</div>
+                                <div class="stat-label">Low</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Col 1, Row 2: Top Targeted Users -->
-                <div class="card">
-                    <h3>Top Targeted Users</h3>
-                    <ul class="top-users-list" id="top-users"></ul>
+                <!-- Charts Row -->
+                <div class="row g-3 mb-4">
+                    <div class="col-lg-5">
+                        <div class="card dashboard-card h-100">
+                            <div class="card-body">
+                                <h6 class="card-subtitle"><i class="bi bi-pie-chart-fill me-2"></i>Severity Distribution
+                                </h6>
+                                <div class="chart-container" style="height: 240px;">
+                                    <canvas id="donutChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-7">
+                        <div class="card dashboard-card h-100">
+                            <div class="card-body">
+                                <h6 class="card-subtitle"><i class="bi bi-graph-up me-2"></i>Alerts Over Time</h6>
+                                <div class="chart-container" style="height: 240px;">
+                                    <canvas id="lineChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Col 2, Row 2: Attack Types -->
-                <div class="card">
-                    <h3>Attack Types Detected</h3>
-                    <canvas id="attackTypesChart"></canvas>
+                <!-- Bottom Row: Multi-column analysis -->
+                <div class="row g-3">
+                    <!-- Top Targeted Users List -->
+                    <div class="col-lg-4">
+                        <div class="card dashboard-card h-100">
+                            <div class="card-body">
+                                <h6 class="card-subtitle"><i class="bi bi-people-fill me-2"></i>Top Targeted Users</h6>
+                                <ul class="list-unstyled top-users-list" id="top-users"></ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Detailed Users Table -->
+                    <div class="col-lg-8">
+                        <div class="card dashboard-card h-100">
+                            <div class="card-body">
+                                <h6 class="card-subtitle"><i class="bi bi-person-badge-fill me-2"></i>Detected Users
+                                    Detail</h6>
+                                <div class="table-responsive" style="max-height: 280px;">
+                                    <table class="table table-sm table-hover align-middle mb-0">
+                                        <thead class="table-dark sticky-top">
+                                            <tr>
+                                                <th>User</th>
+                                                <th>Risk</th>
+                                                <th>Alerts</th>
+                                                <th>Last IP</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="users-dashboard-body">
+                                            <!-- Populated by JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </div>
 
-            <!-- Alert Table -->
-            <div class="table-section">
-                <h3>Security Alerts</h3>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Event ID</th>
-                                <th>Severity</th>
-                                <th>Risk Score</th>
-                                <th>Username</th>
-                                <th>IP Address</th>
-                                <th>Channel</th>
-                                <th>Source</th>
-                                <th>Time</th>
-                                <th>Description</th>
-                            </tr>
-                        </thead>
-                        <tbody id="alert-body">
-                            <tr>
-                                <td colspan="9">
-                                    <div class="empty">
-                                        <span class="icon">📡</span>
-                                        Waiting for alerts...
-                                    </div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <!-- Recent Alerts Row -->
+                <div class="row g-3 mt-1">
+                    <div class="col-12">
+                        <div class="card dashboard-card">
+                            <div class="card-body">
+                                <h6 class="card-subtitle"><i class="bi bi-clock-history me-2"></i>Recent Alerts</h6>
+                                <div class="table-responsive" style="max-height: 400px;">
+                                    <table class="table table-sm table-hover align-middle mb-0">
+                                        <thead class="table-dark sticky-top">
+                                            <tr>
+                                                <th>Event ID</th>
+                                                <th>Severity</th>
+                                                <th>User</th>
+                                                <th>IP</th>
+                                                <th>Description</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="alert-body">
+                                            <!-- Populated by JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </div>
 
-        </section>
 
-        <!-- ═══════════════════════════════════════
-         PAGE: Alerts (full-page table view)
-         ═══════════════════════════════════════ -->
-        <section id="page-alerts" class="page-content page-section">
-            <div class="table-section">
-                <h3>All Security Alerts</h3>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Event ID</th>
-                                <th>Severity</th>
-                                <th>Risk Score</th>
-                                <th>Reason</th>
-                                <th>Username</th>
-                                <th>IP Address</th>
-                                <th>Channel</th>
-                                <th>Source</th>
-                                <th>Computer</th>
-                                <th>Time</th>
-                            </tr>
-                        </thead>
-                        <tbody id="alert-body-full">
-                            <tr>
-                                <td colspan="10">
-                                    <div class="empty">
-                                        <span class="icon">📡</span>
-                                        Waiting for alerts...
-                                    </div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+            </section>
+
+            <!-- ═══════════════════════════════════
+                 PAGE: ALERTS
+                 ═══════════════════════════════════ -->
+            <section id="page-alerts" class="page-section" style="display: none;">
+                <!-- Alerts Toolbar -->
+                <div class="alerts-toolbar d-flex flex-wrap align-items-center gap-2 mb-3">
+                    <div class="input-group" style="max-width: 280px;">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" id="search" placeholder="Search alerts..." />
+                    </div>
+                    <select class="form-select" id="filter-severity" style="max-width: 160px;">
+                        <option value="">All Severities</option>
+                        <option value="CRITICAL">Critical</option>
+                        <option value="HIGH">High</option>
+                        <option value="MEDIUM">Medium</option>
+                        <option value="LOW">Low</option>
+                        <option value="INFO">Info</option>
+                    </select>
+                    <select class="form-select" id="filter-channel" style="max-width: 160px;">
+                        <option value="">All Channels</option>
+                        <option value="Security">Security</option>
+                        <option value="Application">Application</option>
+                        <option value="System">System</option>
+                    </select>
+                    <div class="ms-auto d-flex gap-2">
+                        <button class="btn btn-outline-info btn-sm" id="btn-export" title="Export alerts as CSV">
+                            <i class="bi bi-download me-1"></i>Export CSV
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" id="btn-clear-alerts">
+                            <i class="bi bi-trash3 me-1"></i>Clear All
+                        </button>
+                    </div>
                 </div>
-            </div>
-        </section>
 
-        <!-- Investigation Panel for Alerts Page -->
-        <div class="investigation-panel" id="investigation-panel-alerts">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
-                <h3 style="margin: 0;">🔎 Alert Investigation</h3>
-                <span class="close" onclick="closeInvestigationPanel()" style="font-size: 24px; cursor: pointer; color: var(--text-muted);">&times;</span>
-            </div>
-            <div class="empty-investigation" id="inv-empty-alerts">
-                <div class="icon">🕵️</div>
-                <p>Click an alert row to investigate</p>
-            </div>
-            <div id="inv-content-alerts" style="display:none;">
-                <!-- Filled by JS -->
-            </div>
+                <!-- Alerts Table -->
+                <div class="card dashboard-card">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover table-striped align-middle mb-0" id="alerts-table">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Event ID</th>
+                                        <th>Severity</th>
+                                        <th>Risk Score</th>
+                                        <th>Description</th>
+                                        <th>Username</th>
+                                        <th>IP Address</th>
+                                        <th>Channel</th>
+                                        <th>Source</th>
+                                        <th>Computer</th>
+                                        <th>Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="alert-body-full">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pagination -->
+                <div class="d-flex justify-content-between align-items-center mt-3">
+                    <small class="text-muted" id="alerts-showing">Showing 0 alerts</small>
+                    <nav>
+                        <ul class="pagination pagination-sm mb-0" id="alerts-pagination">
+                            <!-- Populated by JS -->
+                        </ul>
+                    </nav>
+                </div>
+            </section>
+
+            <!-- ═══════════════════════════════════
+                 PAGE: LOGS
+                 ═══════════════════════════════════ -->
+            <section id="page-logs" class="page-section" style="display: none;">
+                <!-- System Health Cards -->
+                <div class="row g-3 mb-4">
+                    <div class="col-md-4">
+                        <div class="card dashboard-card h-100">
+                            <div class="card-body text-center">
+                                <i class="bi bi-pc-display-horizontal fs-1 text-primary"></i>
+                                <h6 class="mt-2 mb-1">Host Machine</h6>
+                                <p class="text-muted mb-0" id="log-hostname">Loading...</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card dashboard-card h-100">
+                            <div class="card-body text-center">
+                                <i class="bi bi-shield-check fs-1 text-success"></i>
+                                <h6 class="mt-2 mb-1">Monitoring Status</h6>
+                                <span class="badge bg-success fs-6">Active</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card dashboard-card h-100">
+                            <div class="card-body text-center">
+                                <i class="bi bi-broadcast-pin fs-1 text-info"></i>
+                                <h6 class="mt-2 mb-1">Monitored Channels</h6>
+                                <div class="d-flex gap-1 justify-content-center flex-wrap mt-1">
+                                    <span class="badge bg-primary">Security</span>
+                                    <span class="badge bg-warning text-dark">Application</span>
+                                    <span class="badge bg-info text-dark">System</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Activity Timeline -->
+                <div class="card dashboard-card">
+                    <div class="card-body">
+                        <h6 class="card-subtitle"><i class="bi bi-clock-history me-2"></i>Activity Timeline</h6>
+                        <div class="timeline" id="activity-timeline">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
         </div>
+    </div>
 
-        
-    </div><!-- /main-wrapper -->
-
-    <!-- Event Details Modal -->
-    <div id="eventModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>🔎 Event Details</h3>
-                <span class="close" onclick="closeEventModal()">&times;</span>
-            </div>
-            <div class="modal-body" id="modal-body">
-                <!-- Content will be populated by JavaScript -->
+    <!-- ═══ Investigation Modal ═══ -->
+    <div class="modal fade" id="investigationModal" tabindex="-1" aria-labelledby="investigationModalLabel"
+        aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header border-bottom border-secondary">
+                    <h5 class="modal-title" id="investigationModalLabel">
+                        <i class="bi bi-search me-2"></i>Alert Investigation
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="investigation-content">
+                    <!-- Populated by JS -->
+                </div>
+                <div class="modal-footer border-top border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-success" id="btn-mark-investigated">
+                        <i class="bi bi-check-lg me-1"></i>Mark Investigated
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
     <script src="/static/js/main.js"></script>
 </body>
 

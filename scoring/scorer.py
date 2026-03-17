@@ -2,6 +2,7 @@
 import threading
 from collections import defaultdict
 from datetime import datetime, timedelta
+from notifications.email_notifier import send_critical_alert
 
 scorer_lock = threading.Lock()
 
@@ -11,17 +12,18 @@ score_history  = defaultdict(int)    # username → accumulated score
 WINDOW_SECONDS = 60                  # 1 minute rolling window
 
 BASE_SCORES = {
-    "High":   80,
-    "Medium": 50,
-    "Low":    25,
-    "Normal":  0
+    "Critical": 90,
+    "High":     70,
+    "Medium":   40,
+    "Low":      20,
+    "Normal":    0
 }
 
 BONUS_SCORES = {
     "Brute Force":       20,
     "Off Hours":         15,
     "Multiple IPs":      15,
-    "Audit Log Cleared": 15,
+    "Audit Log Cleared": 20,
     "Malware":           10,
     "Firewall Stopped":  10,
     "Privileged Group":  10,
@@ -96,6 +98,21 @@ def _calculate_score_locked(detected_result):
         severity = "LOW"
     else:
         severity = "INFO"
+
+    # Send email notification for critical alerts only
+    if severity == "CRITICAL":
+        try:
+            send_critical_alert({
+                **detected_result,
+                "risk_score": score,
+                "severity": severity,
+                "user_total_score": min(score_history[username], 999)
+            })
+        except Exception as e:
+            # Log error but don't break the scoring process
+            import logging
+            logger = logging.getLogger("ids.scorer")
+            logger.error(f"Failed to send critical alert email: {e}")
 
     return {
         **detected_result,

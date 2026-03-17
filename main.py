@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import json
 from contextlib import asynccontextmanager
 from collections import defaultdict
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query
@@ -15,6 +16,7 @@ from detection.detector        import detect
 from scoring.scorer            import calculate_score
 from db.database               import init_db, save_alert, get_alerts, get_stats, clear_alerts
 from alerts.alert_manager      import alert_manager
+from notifications.email_notifier import send_critical_alert
 
 logger = logging.getLogger("ids.main")
 
@@ -36,10 +38,7 @@ async def poll_logs():
                 logs = read_logs(channel, after_record=last_record[channel])
 
                 for log in logs:
-                    # Track latest RecordNumber BEFORE processing
                     rid = log.get("record_id", 0)
-                    if rid > last_record[channel]:
-                        last_record[channel] = rid
 
                     # Full pipeline
                     clean    = normalize(log)
@@ -63,17 +62,29 @@ async def poll_logs():
                             "risk_score":  scored["risk_score"],
                             "reason":      scored["reason"],
                             "mitigation":  scored.get("mitigation", ""),
-                            "raw_data":    scored.get("raw_data", "[]")
+                            "raw_data":    json.dumps(scored.get("raw_data", []))
                         }
                         
                         # save_alert returns True if inserted (not duplicate)
                         if save_alert(alert_data):
                             await alert_manager.dispatch(alert_data)
+                    
+                    # Now that log is processed, update last_record
+                    if rid > last_record[channel]:
+                        last_record[channel] = rid
 
             except Exception as e:
                 logger.error(f"{channel}: {e}", exc_info=True)
 
         await asyncio.sleep(POLL_INTERVAL)
+
+
+async def handle_email_alerts(alert):
+    """
+    Subscriber callback to send emails for critical alerts
+    """
+    if alert.get("severity") == "CRITICAL":
+        send_critical_alert(alert)
 
 
 # ── Lifespan (Startup/Shutdown) ───────────
@@ -86,6 +97,10 @@ async def lifespan(app: FastAPI):
     # Start polling task
     polling_task = asyncio.create_task(poll_logs())
     logger.info("Polling task started ✅")
+    
+    # Register email notifier
+    alert_manager.add_subscriber(handle_email_alerts)
+    logger.info("Email notifier registered ✅")
     
     yield
     
@@ -146,8 +161,9 @@ async def websocket_endpoint(websocket: WebSocket):
     async def send_alert(alert):
         try:
             await websocket.send_json({"type": "NEW_ALERT", "alert": alert})
-        except Exception:
-            pass  # Handle disconnect gracefully
+        except Exception as e:
+            # Log errors, but don't crash the server if one client fails
+            logger.error(f"Error sending alert to client: {e}", exc_info=True)
             
     # Subscribe this connection to the alert manager
     alert_manager.add_subscriber(send_alert)
@@ -158,5 +174,5 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         logger.info("Client disconnected from WebSocket")
-        # Removing from alert_manager list is complex in this simple design,
-        # so we just let the send fail on next try
+    finally:
+        alert_manager.remove_subscriber(send_alert)

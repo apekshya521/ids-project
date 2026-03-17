@@ -10,6 +10,10 @@ class AlertManager:
         """Add a callback to be notified when an alert happens."""
         self.subscribers.append(callback)
         
+    def remove_subscriber(self, callback):
+        """Remove a callback."""
+        self.subscribers.remove(callback)
+        
     async def dispatch(self, alert):
         """Send the alert to all subscribers."""
         logger.info(f" New ALERT: {alert.get('severity')} - {alert.get('reason')}")

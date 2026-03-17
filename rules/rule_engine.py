@@ -34,14 +34,13 @@ HIGH_RISK = {
 MEDIUM_RISK = {
     4625,   # failed login
     4740,   # account lock
-    4672,   # admin privileges
     4688,   # process created
     4702,   # scheduled task modified
     4648    # explicit credentials
 }
 
 LOW_RISK = {
-    4634, 4647, 4768, 4769, 4771,
+    4634, 4647, 4672, 4768, 4769, 4771,
     4776, 4778, 4779, 4798, 4799,
     5140, 5142, 5144, 5145, 5156,
     5157, 7040, 6008, 7036

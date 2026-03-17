@@ -10,3 +10,5 @@ python-multipart
 websockets
 jinja2
 pytest
+python-dotenv
+sendgrid
