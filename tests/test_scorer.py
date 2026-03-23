@@ -62,7 +62,6 @@ for t in tests:
         f"{t['name']:<25}"
         f" {result['risk_score']:>5}/100"
         f"  {result['severity']:<10}"
-        f" {result['user_total_score']:>5} (total)"
     )
     print(f"  → {result['mitigation']}")
     print("-" * 65)

@@ -12,3 +12,6 @@ jinja2
 pytest
 python-dotenv
 sendgrid
+pywinrm
+colorama
+pyyaml

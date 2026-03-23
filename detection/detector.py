@@ -20,6 +20,10 @@ def detect(log):
         
         if len(user_sessions[username]) > 100:
             logger.warning(f"High activity volume detected for user: {username}")
+        
+        # Clean up inactive users to prevent memory leak
+        if not user_sessions[username]:
+            del user_sessions[username]
             
     # Delegate to rules engine
     return apply_rules(log)

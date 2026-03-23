@@ -1,0 +1,317 @@
+rules:
+
+  # ────────────────────────────────────────────────────────────────
+  # TIER 1 — Critical, zero tuning needed, deploy immediately
+  # ────────────────────────────────────────────────────────────────
+
+  - id: R001
+    name: audit_log_cleared
+    mitre: T1070.001
+    tier: 1
+    category: defense_evasion
+    event_ids: [1102, 104]
+    severity: critical
+    base_score: 88
+    threshold: null
+    confidence_on_threshold: 1.0
+    reason: "Audit log cleared — possible evidence destruction"
+
+  - id: R002
+    name: brute_force_login
+    mitre: T1110.001
+    tier: 1
+    category: credential_access
+    event_ids: [4625]
+    severity: high
+    base_score: 65
+    threshold:
+      count: 8
+      window_seconds: 300
+      group_by: username
+    confidence_single: 0.0
+    confidence_on_threshold: 0.75
+    reason: "Brute force: {count} failed logins in {window}s for same account"
+
+  - id: R003
+    name: malware_detected
+    mitre: T1587
+    tier: 1
+    category: execution
+    event_ids: [1116, 1117]
+    severity: critical
+    base_score: 90
+    threshold: null
+    confidence_on_threshold: 1.0
+    reason: "Windows Defender detected and acted on malware"
+
+  - id: R004
+    name: firewall_disabled
+    mitre: T1562.004
+    tier: 1
+    category: defense_evasion
+    event_ids: [5025]
+    severity: critical
+    base_score: 82
+    threshold: null
+    confidence_on_threshold: 1.0
+    reason: "Windows Firewall service stopped — perimeter defense removed"
+
+  - id: R005
+    name: defender_disabled
+    mitre: T1562.001
+    tier: 1
+    category: defense_evasion
+    event_ids: [5001, 5007]
+    severity: critical
+    base_score: 82
+    threshold: null
+    confidence_on_threshold: 0.9
+    confidence_reducers:
+      - condition: event_id_is
+        value: 5007
+        reduce_to: 0.6
+    reason: "Windows Defender protection disabled or reconfigured"
+
+  - id: R006
+    name: new_user_created
+    mitre: T1136.001
+    tier: 1
+    category: persistence
+    event_ids: [4720]
+    severity: high
+    base_score: 70
+    threshold: null
+    confidence_on_threshold: 0.9
+    reason: "New local user account created: {target_username}"
+
+  - id: R007
+    name: user_added_to_privileged_group
+    mitre: T1098
+    tier: 1
+    category: privilege_escalation
+    event_ids: [4728, 4732, 4756]
+    severity: high
+    base_score: 72
+    threshold: null
+    confidence_on_threshold: 0.88
+    reason: "Account added to privileged security group"
+
+  - id: R008
+    name: audit_policy_changed
+    mitre: T1562.002
+    tier: 1
+    category: defense_evasion
+    event_ids: [4719]
+    severity: high
+    base_score: 70
+    threshold: null
+    confidence_on_threshold: 0.85
+    reason: "System audit policy changed — monitoring coverage may be reduced"
+
+  - id: R009
+    name: new_service_installed
+    mitre: T1543.003
+    tier: 1
+    category: persistence
+    event_ids: [7045, 4697]
+    severity: critical
+    base_score: 78
+    threshold: null
+    confidence_on_threshold: 0.9
+    confidence_reducers:
+      - condition: path_contains
+        value: "windows\\system32"
+        reduce_to: 0.15
+      - condition: path_contains
+        value: "windows\\syswow64"
+        reduce_to: 0.15
+      - condition: path_contains
+        value: "program files\\windows"
+        reduce_to: 0.2
+    reason: "New service installed: {service_name} at path: {service_path}"
+
+  - id: R010
+    name: scheduled_task_created
+    mitre: T1053.005
+    tier: 1
+    category: persistence
+    event_ids: [4698]
+    severity: high
+    base_score: 65
+    threshold: null
+    confidence_on_threshold: 0.8
+    confidence_reducers:
+      - condition: path_contains
+        value: "\\microsoft\\windows\\"
+        reduce_to: 0.1
+      - condition: path_contains
+        value: "\\microsoft\\office\\"
+        reduce_to: 0.1
+    reason: "Scheduled task created: {task_name}"
+
+  # ────────────────────────────────────────────────────────────────
+  # TIER 2 — High value, needs minor tuning per environment
+  # ────────────────────────────────────────────────────────────────
+
+  - id: R011
+    name: success_after_failure
+    mitre: T1110
+    tier: 2
+    category: credential_access
+    event_ids: [4624]
+    severity: high
+    base_score: 62
+    threshold:
+      count: 1
+      window_seconds: 600
+      group_by: username
+    # This rule works alongside R002 — R002 tracks 4625,
+    # this fires on 4624 only when prior failures exist in window.
+    # The rule_engine checks prior_failures_in_window flag.
+    require_prior_failures: true
+    prior_failure_event_id: 4625
+    prior_failure_min: 3
+    prior_failure_window: 600
+    confidence_single: 0.0
+    confidence_on_threshold: 0.85
+    reason: "Successful login after {prior_count} recent failures — possible brute force success"
+
+  - id: R012
+    name: password_spray
+    mitre: T1110.003
+    tier: 2
+    category: credential_access
+    event_ids: [4625]
+    severity: high
+    base_score: 68
+    threshold:
+      unique_usernames: 5
+      window_seconds: 300
+      group_by: ip_address
+    confidence_single: 0.0
+    confidence_on_threshold: 0.8
+    reason: "Password spray: {unique_usernames} accounts targeted from same IP"
+
+  - id: R013
+    name: account_lockout
+    mitre: T1110
+    tier: 2
+    category: credential_access
+    event_ids: [4740]
+    severity: medium
+    base_score: 42
+    threshold: null
+    confidence_on_threshold: 0.65
+    reason: "Account locked out: {target_username}"
+
+  - id: R014
+    name: off_hours_admin_login
+    mitre: T1078.002
+    tier: 2
+    category: initial_access
+    event_ids: [4624]
+    severity: high
+    base_score: 60
+    threshold: null
+    confidence_on_threshold: 0.0
+    require_context:
+      - off_hours: true
+      - username_in: [administrator, admin, domain_admin, root]
+    confidence_when_context_met: 0.82
+    reason: "Admin account logged in outside business hours"
+
+  - id: R015
+    name: explicit_credentials_abuse
+    mitre: T1134.003
+    tier: 2
+    category: privilege_escalation
+    event_ids: [4648]
+    severity: medium
+    base_score: 42
+    threshold:
+      count: 5
+      window_seconds: 3600
+      group_by: username
+    confidence_single: 0.0
+    confidence_on_threshold: 0.65
+    reason: "Explicit credentials used {count} times in 1 hour — possible lateral movement"
+
+  # ────────────────────────────────────────────────────────────────
+  # TIER 3 — Needs baseline data or keyword lists before enabling
+  # ────────────────────────────────────────────────────────────────
+
+  - id: R016
+    name: multiple_ip_login
+    mitre: T1078
+    tier: 3
+    category: lateral_movement
+    event_ids: [4624]
+    severity: medium
+    base_score: 48
+    threshold:
+      unique_ips: 4
+      window_seconds: 3600
+      group_by: username
+    confidence_single: 0.0
+    confidence_on_threshold: 0.65
+    reason: "Account used from {ip_count} distinct IPs within 1 hour"
+
+  - id: R017
+    name: powershell_suspicious_execution
+    mitre: T1059.001
+    tier: 3
+    category: execution
+    event_ids: [4104]
+    severity: high
+    base_score: 65
+    threshold: null
+    confidence_on_threshold: 0.0
+    require_content_match:
+      field: message
+      keywords:
+        - "invoke-mimikatz"
+        - "invoke-expression"
+        - "-encodedcommand"
+        - "downloadstring"
+        - "net.webclient"
+        - "bypass"
+        - "-nop"
+        - "iex("
+      min_matches: 1
+    confidence_when_content_matched: 0.85
+    reason: "Suspicious PowerShell script block detected — keyword: {matched_keyword}"
+
+  - id: R018
+    name: network_share_accessed_offhours
+    mitre: T1039
+    tier: 3
+    category: lateral_movement
+    event_ids: [5140]
+    severity: low
+    base_score: 28
+    threshold: null
+    confidence_on_threshold: 0.0
+    require_context:
+      - off_hours: true
+    confidence_when_context_met: 0.55
+    reason: "Network share accessed from {ip} during off-hours"
+
+  - id: R019
+    name: scheduled_task_modified
+    mitre: T1053.005
+    tier: 3
+    category: persistence
+    event_ids: [4702]
+    severity: medium
+    base_score: 38
+    threshold:
+      count: 3
+      window_seconds: 300
+      group_by: username
+    confidence_single: 0.0
+    confidence_on_threshold: 0.6
+    confidence_reducers:
+      - condition: path_contains
+        value: "\\microsoft\\windows\\"
+        reduce_to: 0.05
+    reason: "Scheduled task modified {count} times rapidly - possible tampering"

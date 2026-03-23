@@ -1,361 +1,378 @@
+import yaml
 import threading
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
-from config import EVENT_DESCRIPTIONS as ALL_EVENTS
+from pathlib import Path
 
 logger = logging.getLogger("ids.rules")
+_lock  = threading.Lock()
+_BASE  = Path(__file__).parent
 
-# ─────────────────────────────────────────────
-# Thread Safety
-# ─────────────────────────────────────────────
-rules_lock = threading.Lock()
 
-# ─────────────────────────────────────────────
-# Risk Levels (Noise Optimized)
-# ─────────────────────────────────────────────
-CRITICAL_RISK = {
-    1102,   # audit log cleared
-    7045,   # service installed
-    4719,   # audit policy changed
-    5025,   # firewall stopped
-    1116,   # malware detected
-    1117    # malware action
-}
+# ── Load YAML files ────────────────────────────────────────────────────────
 
-HIGH_RISK = {
-    4720,   # user created
-    4726,   # user deleted
-    4698,   # scheduled task created
-    4728,   # added to admin group
-    4732,   # added to local admin
-}
-
-MEDIUM_RISK = {
-    4625,   # failed login
-    4740,   # account lock
-    4688,   # process created
-    4702,   # scheduled task modified
-    4648    # explicit credentials
-}
-
-LOW_RISK = {
-    4634, 4647, 4672, 4768, 4769, 4771,
-    4776, 4778, 4779, 4798, 4799,
-    5140, 5142, 5144, 5145, 5156,
-    5157, 7040, 6008, 7036
-}
-
-# ─────────────────────────────────────────────
-# Ignore Windows Noise
-# ─────────────────────────────────────────────
-IGNORE_EVENTS = {
-    16384, 16394,
-    10010,
-    6005, 6006
-}
-
-# ─────────────────────────────────────────────
-# Account Filters
-# ─────────────────────────────────────────────
-SYSTEM_ACCOUNTS = {
-    "SYSTEM",
-    "LOCAL SERVICE",
-    "NETWORK SERVICE",
-    "NT AUTHORITY\\SYSTEM",
-    "NT AUTHORITY\\LOCAL SERVICE",
-    "NT AUTHORITY\\NETWORK SERVICE"
-}
-
-ADMIN_ACCOUNTS = {
-    "administrator",
-    "admin",
-    "domain_admin"
-}
-
-# ─────────────────────────────────────────────
-# Tracking Variables
-# ─────────────────────────────────────────────
-failed_logins = defaultdict(lambda: {"count": 0, "ips": set(), "timestamp": None})
-user_ips = defaultdict(lambda: {"ips": set(), "timestamp": None})
-explicit_logons = defaultdict(lambda: {"count": 0, "timestamp": None})
-
-recent_alerts = {}
-
-# ─────────────────────────────────────────────
-# Thresholds
-# ─────────────────────────────────────────────
-BRUTE_FORCE_LIMIT = 8
-EXPLICIT_LOGON_LIMIT = 6
-MULTI_IP_LIMIT = 4
-TRACKING_WINDOW = 3600
-ALERT_SUPPRESSION = 300
-
-# ─────────────────────────────────────────────
-# Cleanup Old Entries
-# ─────────────────────────────────────────────
-def cleanup_old_entries(now):
-
-    cutoff = now - timedelta(seconds=TRACKING_WINDOW)
-
-    for store in (failed_logins, user_ips, explicit_logons):
-        remove = [
-            u for u, d in store.items()
-            if d["timestamp"] and d["timestamp"] < cutoff
-        ]
-        for u in remove:
-            del store[u]
-
-# ─────────────────────────────────────────────
-# Off Hours Detection
-# ─────────────────────────────────────────────
-def check_off_hours(time_str):
-
+def _load_yaml(path: Path) -> dict:
     try:
-        dt = datetime.strptime(time_str[:19], "%Y-%m-%d %H:%M:%S")
-        return 0 <= dt.hour < 5
-    except:
-        return False
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        logger.error(f"Missing file: {path}")
+        return {}
 
-# ─────────────────────────────────────────────
-# Multiple IP Detection
-# ─────────────────────────────────────────────
-def check_multiple_ips(username, ip):
 
-    if ip and ip != "N/A":
-        user_ips[username]["ips"].add(ip)
+RULES     = _load_yaml(_BASE / "rules.yaml").get("rules", [])
+ALLOWLIST = _load_yaml(_BASE / "allowlist.yaml")
 
-    return len(user_ips[username]["ips"]) > MULTI_IP_LIMIT
+# O(1) lookup: event_id → list of rules
+_RULES_BY_EVENT: dict[int, list] = defaultdict(list)
+for _r in RULES:
+    for _eid in _r.get("event_ids", []):
+        _RULES_BY_EVENT[_eid].append(_r)
 
-# ─────────────────────────────────────────────
-# Alert Deduplication
-# ─────────────────────────────────────────────
-def suppress_duplicate(event_id, username, now):
+logger.info(f"Rule engine ready — {len(RULES)} rules, "
+            f"{len(_RULES_BY_EVENT)} event IDs covered")
 
-    key = f"{event_id}-{username}"
 
-    if key in recent_alerts:
-        if (now - recent_alerts[key]).seconds < ALERT_SUPPRESSION:
-            return True
+# ── In-memory state ────────────────────────────────────────────────────────
 
-    recent_alerts[key] = now
-    return False
+# Per-username window: tracks events, unique IPs seen
+_windows: dict[str, dict] = defaultdict(lambda: {
+    "events":     [],        # [(timestamp, rule_id, ip)]
+    "unique_ips": set(),
+})
 
-# ─────────────────────────────────────────────
-# Rule Entry
-# ─────────────────────────────────────────────
-def apply_rules(log):
+# Per-IP window: tracks unique usernames (for password spray R012)
+_ip_windows: dict[str, dict] = defaultdict(lambda: {
+    "events":       [],
+    "unique_users": set(),
+})
 
-    with rules_lock:
-        return _apply_rules_locked(log)
 
-# ─────────────────────────────────────────────
-# Rule Engine
-# ─────────────────────────────────────────────
-def _apply_rules_locked(log):
+def _cleanup(state: dict, now: datetime, window_seconds: int):
+    cutoff = now - timedelta(seconds=window_seconds)
+    kept = [e for e in state["events"] if e[0] > cutoff]
+    state["events"] = kept
+    # Rebuild unique_ips from surviving events to prevent stale entries
+    state["unique_ips"] = {e[2] for e in kept if e[2] not in ("N/A", "Non-Network Event", "Host-Based Event", "")}
 
-    event_id = log["event_id"]
-    username = log.get("username", "N/A")
-    ip = log.get("ip_address", "N/A")
-    time = log.get("time", "unknown")
-    channel = log.get("channel", "unknown")
-    computer = log.get("computer", "unknown")
-    logon_type = log.get("logon_type")
 
-    description = ALL_EVENTS.get(str(event_id), "Unknown Event")
+def _cleanup_ip(state: dict, now: datetime, window_seconds: int):
+    cutoff = now - timedelta(seconds=window_seconds)
+    kept = [e for e in state["events"] if e[0] > cutoff]
+    state["events"] = kept
+    state["unique_users"] = {e[2] for e in kept}
 
-    now = datetime.now()
 
-    cleanup_old_entries(now)
+# ── Allowlist ──────────────────────────────────────────────────────────────
 
-    result = {
-        "event_id": event_id,
-        "description": description,
-        "channel": channel,
-        "time": time,
-        "computer": computer,
-        "username": username,
-        "ip_address": ip,
-        "source": log.get("source", "Unknown"),
-        "is_suspicious": False,
-        "risk_level": "Normal",
-        "reason": description
+def _allowlist_multiplier(log: dict, rule_id: str | None = None) -> float:
+    username  = log.get("username", "")
+    ip        = log.get("ip_address", "")
+    device_id = log.get("device_id", "local")
+
+    # Hard suppress system accounts
+    if username in ALLOWLIST.get("usernames", []):
+        return 0.0
+
+    # Per-device rule suppression
+    device_cfg = ALLOWLIST.get("devices", {}).get(device_id, {})
+    suppressed = device_cfg.get("suppress_rules", [])
+    if rule_id and rule_id in suppressed:
+        return 0.0
+
+    # Trusted IPs reduce confidence
+    trusted_cfg = ALLOWLIST.get("trusted_ips", {})
+    if ip in trusted_cfg.get("addresses", []):
+        return 1.0 - trusted_cfg.get("confidence_reduction", 0.4)
+
+    return 1.0
+
+
+# ── Context ────────────────────────────────────────────────────────────────
+
+def _is_off_hours(now: datetime, log: dict = None) -> bool:
+    """
+    Check whether an event occurred outside business hours.
+    Uses the log's own time field when available — essential for
+    replayed logs and demo/test scenarios where system time differs
+    from the event time being tested.
+    """
+    if log:
+        time_str = log.get("time", "")
+        if time_str:
+            try:
+                now = datetime.strptime(str(time_str)[:19], "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                pass  # fall back to system time
+
+    bh    = ALLOWLIST.get("business_hours", {})
+    start = bh.get("start", 8)
+    end   = bh.get("end", 19)
+    days  = bh.get("days", [0, 1, 2, 3, 4])
+    return (now.weekday() not in days) or not (start <= now.hour < end)
+
+
+def _context_multiplier(now: datetime, log: dict = None) -> float:
+    return 1.25 if _is_off_hours(now, log) else 1.0
+
+
+# ── Context condition checker ──────────────────────────────────────────────
+
+def _context_conditions_met(conditions: list, log: dict, now: datetime) -> bool:
+    username = log.get("username", "").lower()
+
+    for cond in conditions:
+        if "off_hours" in cond:
+            # Pass log so time field is used, not system clock
+            if cond["off_hours"] != _is_off_hours(now, log):
+                return False
+
+        if "username_in" in cond:
+            allowed = [u.lower() for u in cond["username_in"]]
+            if username not in allowed:
+                return False
+
+        if "username_not_in" in cond:
+            blocked = [u.lower() for u in cond["username_not_in"]]
+            if username in blocked:
+                return False
+
+    return True
+
+
+# ── Confidence reducer ─────────────────────────────────────────────────────
+
+def _apply_reducers(rule: dict, log: dict, confidence: float) -> float:
+    for reducer in rule.get("confidence_reducers", []):
+        condition = reducer.get("condition", "")
+
+        if condition == "path_contains":
+            val  = reducer.get("value", "").lower()
+            path = (
+                log.get("service_path", "") or
+                log.get("task_path", "") or
+                log.get("message", "")
+            ).lower()
+            if val in path:
+                confidence = reducer.get("reduce_to", confidence)
+
+        elif condition == "event_id_is":
+            if log.get("event_id") == reducer.get("value"):
+                confidence = reducer.get("reduce_to", confidence)
+
+    return confidence
+
+
+# ── Result builder ─────────────────────────────────────────────────────────
+
+def _build_result(rule: dict, log: dict, confidence: float, **fmt) -> dict:
+    try:
+        reason = rule["reason"].format(
+            count            = fmt.get("count", 1),
+            prior_count      = fmt.get("prior_count", 0),
+            window           = (rule.get("threshold") or {}).get("window_seconds", 0),
+            ip               = log.get("ip_address", "unknown"),
+            ip_count         = fmt.get("ip_count", 0),
+            unique_usernames = fmt.get("unique_usernames", 0),
+            service_name     = log.get("service_name", "unknown"),
+            service_path     = log.get("service_path", "unknown"),
+            task_name        = log.get("task_name", "unknown"),
+            target_username  = log.get("target_username",
+                                       log.get("username", "unknown")),
+            matched_keyword  = fmt.get("matched_keyword", ""),
+        )
+    except (KeyError, ValueError):
+        reason = rule.get("reason", rule["name"])
+
+    return {
+        "rule_id":       rule["id"],
+        "rule_name":     rule["name"],
+        "mitre":         rule.get("mitre", ""),
+        "category":      rule.get("category", "unknown"),
+        "severity":      rule["severity"],
+        "base_score":    rule["base_score"],
+        "confidence":    round(confidence, 4),
+        "reason":        reason,
+        "is_suspicious": True,
     }
 
-    # ─────────────────────────
-    # Ignore Noise Events
-    # ─────────────────────────
-    if event_id in IGNORE_EVENTS:
-        return result
 
-    # ─────────────────────────
-    # Ignore System Accounts
-    # ─────────────────────────
-    if username in SYSTEM_ACCOUNTS:
-        return result
+# ── Rule evaluators ────────────────────────────────────────────────────────
 
-    # ─────────────────────────
-    # Brute Force Detection
-    # ─────────────────────────
-    if event_id == 4625:
+def _eval_single_fire(rule: dict, log: dict, now: datetime) -> dict | None:
+    """Rules with threshold: null — fire on first matching event."""
+    confidence = rule.get("confidence_on_threshold", 1.0)
 
-        failed_logins[username]["count"] += 1
-        failed_logins[username]["ips"].add(ip)
-        failed_logins[username]["timestamp"] = now
+    # Context-gated rules (e.g. off_hours_admin R014, network share R018)
+    require_ctx = rule.get("require_context", [])
+    if require_ctx:
+        if not _context_conditions_met(require_ctx, log, now):
+            return None
+        confidence = rule.get("confidence_when_context_met", confidence)
 
-        if (
-            failed_logins[username]["count"] >= BRUTE_FORCE_LIMIT
-            and len(failed_logins[username]["ips"]) == 1
-        ):
+    # Content keyword match (e.g. PowerShell R017)
+    content_cfg = rule.get("require_content_match")
+    if content_cfg:
+        message  = log.get(content_cfg.get("field", "message"), "").lower()
+        keywords = content_cfg.get("keywords", [])
+        matched  = [kw for kw in keywords if kw.lower() in message]
+        if len(matched) < content_cfg.get("min_matches", 1):
+            return None
+        confidence = rule.get("confidence_when_content_matched",
+                               content_cfg.get("confidence", 0.7))
+        return _build_result(rule, log, confidence,
+                             matched_keyword=matched[0])
 
-            if suppress_duplicate(event_id, username, now):
-                return result
+    # Apply confidence reducers (e.g. system32 path for services)
+    confidence = _apply_reducers(rule, log, confidence)
 
-            result.update({
-                "is_suspicious": True,
-                "risk_level": "High",
-                "reason": f"Brute Force Suspected: {failed_logins[username]['count']} failures"
-            })
+    if confidence <= 0.0:
+        return None
 
-            return result
+    return _build_result(rule, log, confidence)
 
-    # ─────────────────────────
-    # Reset Counter on Success
-    # ─────────────────────────
-    if event_id == 4624:
-        failed_logins[username]["count"] = 0
 
-    # ─────────────────────────
-    # Off Hours Admin Login
-    # ─────────────────────────
-    if event_id == 4624 and username.lower() in ADMIN_ACCOUNTS:
+def _eval_threshold(rule: dict, log: dict,
+                    state: dict, now: datetime) -> dict | None:
+    """Rules with a count or unique_ips threshold."""
+    threshold_cfg = rule["threshold"]
+    window_secs   = threshold_cfg.get("window_seconds", 3600)
+    group_by      = threshold_cfg.get("group_by", "username")
+    ip            = log.get("ip_address", "N/A")
+    username      = log.get("username", "N/A")
 
-        if check_off_hours(time):
+    # ── Password spray: group by IP (R012) ────────────────────────
+    if group_by == "ip_address":
+        ip_state = _ip_windows[ip]
+        _cleanup_ip(ip_state, now, window_secs)
+        ip_state["events"].append((now, rule["id"], username))
+        ip_state["unique_users"].add(username)
 
-            result.update({
-                "is_suspicious": True,
-                "risk_level": "High",
-                "reason": f"Off-hours admin login detected"
-            })
+        required = threshold_cfg.get("unique_usernames", 999)
+        if len(ip_state["unique_users"]) >= required:
+            confidence = rule.get("confidence_on_threshold", 0.8)
+            return _build_result(rule, log, confidence,
+                                 unique_usernames=len(ip_state["unique_users"]))
+        return None
 
-            return result
+    # ── Unique IPs threshold (R016) ────────────────────────────────
+    if "unique_ips" in threshold_cfg:
+        state["unique_ips"].add(ip)
+        if len(state["unique_ips"]) >= threshold_cfg["unique_ips"]:
+            confidence = rule.get("confidence_on_threshold", 0.65)
+            return _build_result(rule, log, confidence,
+                                 ip_count=len(state["unique_ips"]))
+        return None
 
-    # ─────────────────────────
-    # Multiple IP Detection
-    # ─────────────────────────
-    if event_id == 4624 and check_multiple_ips(username, ip):
+    # ── Standard count threshold ───────────────────────────────────
+    rule_events = [e for e in state["events"] if e[1] == rule["id"]]
+    count       = len(rule_events)
+    required    = threshold_cfg.get("count", 999)
 
-        result.update({
-            "is_suspicious": True,
-            "risk_level": "Medium",
-            "reason": f"User logged in from multiple IPs"
-        })
+    if count < required:
+        return None
 
-        return result
+    # ── Success-after-failure check (R011) ─────────────────────────
+    if rule.get("require_prior_failures"):
+        prior_eid      = rule.get("prior_failure_event_id", 4625)
+        prior_min      = rule.get("prior_failure_min", 3)
+        prior_win      = rule.get("prior_failure_window", 600)
+        cutoff         = now - timedelta(seconds=prior_win)
+        prior_rules    = [r for r in RULES if prior_eid in r.get("event_ids", [])]
+        prior_rule_ids = {r["id"] for r in prior_rules}
+        prior_count    = sum(
+            1 for t, rid, i in state["events"]
+            if t > cutoff and rid in prior_rule_ids
+        )
+        if prior_count < prior_min:
+            return None
+        confidence = rule.get("confidence_on_threshold", 0.85)
+        return _build_result(rule, log, confidence, prior_count=prior_count)
 
-    # ─────────────────────────
-    # Explicit Credentials Abuse
-    # ─────────────────────────
-    if event_id == 4648:
+    confidence = rule.get("confidence_on_threshold", 0.75)
+    confidence = _apply_reducers(rule, log, confidence)
+    return _build_result(rule, log, confidence, count=count,
+                         window=threshold_cfg.get("window_seconds", 0))
 
-        explicit_logons[username]["count"] += 1
-        explicit_logons[username]["timestamp"] = now
 
-        if explicit_logons[username]["count"] >= EXPLICIT_LOGON_LIMIT:
+def _evaluate_rule(rule: dict, log: dict,
+                   state: dict, now: datetime) -> dict | None:
+    window_secs = (rule.get("threshold") or {}).get("window_seconds", 3600)
+    ip          = log.get("ip_address", "N/A")
 
-            result.update({
-                "is_suspicious": True,
-                "risk_level": "Medium",
-                "reason": "Repeated explicit credential usage"
-            })
+    # Cleanup uses the rule's own window, then we add the new event
+    _cleanup(state, now, window_secs)
+    state["events"].append((now, rule["id"], ip))
+    # unique_ips is now rebuilt by _cleanup, so just add the new one
+    if ip not in ("N/A", "Non-Network Event", "Host-Based Event", ""):
+        state["unique_ips"].add(ip)
 
-            return result
+    if rule.get("threshold") is None:
+        return _eval_single_fire(rule, log, now)
+    else:
+        return _eval_threshold(rule, log, state, now)
 
-    # ─────────────────────────
-    # Audit Log Cleared
-    # ─────────────────────────
-    if event_id == 1102:
 
-        result.update({
-            "is_suspicious": True,
-            "risk_level": "Critical",
-            "reason": "Security audit log cleared"
-        })
+# ── Public entry point ─────────────────────────────────────────────────────
 
-        return result
+def apply_rules(log: dict) -> dict:
+    with _lock:
+        return _apply_rules_locked(log)
 
-    # ─────────────────────────
-    # Malware Detected
-    # ─────────────────────────
-    if event_id in {1116, 1117}:
 
-        result.update({
-            "is_suspicious": True,
-            "risk_level": "Critical",
-            "reason": "Malware detected by Windows Defender"
-        })
+def _apply_rules_locked(log: dict) -> dict:
+    event_id = log.get("event_id", 0)
+    username = log.get("username", "N/A")
+    now      = datetime.now()
 
-        return result
+    base = {
+        **log,
+        "is_suspicious":        False,
+        "rule_id":              None,
+        "rule_name":            None,
+        "mitre":                None,
+        "category":             None,
+        "severity":             "normal",
+        "base_score":           0,
+        "confidence":           0.0,
+        "reason":               log.get("description", ""),
+        "context_multiplier":   1.0,
+        "allowlist_multiplier": 1.0,
+    }
 
-    # ─────────────────────────
-    # Firewall Disabled
-    # ─────────────────────────
-    if event_id == 5025:
+    matching_rules = _RULES_BY_EVENT.get(event_id, [])
+    if not matching_rules:
+        return base
 
-        result.update({
-            "is_suspicious": True,
-            "risk_level": "Critical",
-            "reason": "Windows firewall stopped"
-        })
+    state = _windows[username]
 
-        return result
+    # Evaluate all matching rules, keep best (highest confidence)
+    best: dict | None = None
+    for rule in matching_rules:
+        al_mult = _allowlist_multiplier(log, rule["id"])
+        if al_mult == 0.0:
+            continue
 
-    # ─────────────────────────
-    # Suspicious Service Install
-    # ─────────────────────────
-    if event_id == 7045:
+        result = _evaluate_rule(rule, log, state, now)
+        if result is None:
+            continue
 
-        path = log.get("service_path", "").lower()
+        if best is None or result["confidence"] > best["confidence"]:
+            best = result
+            best["_al_mult"] = al_mult
 
-        if "windows\\system32" not in path:
+    if best is None:
+        return base
 
-            result.update({
-                "is_suspicious": True,
-                "risk_level": "Critical",
-                "reason": f"Suspicious service installed: {path}"
-            })
+    al_mult  = best.pop("_al_mult", 1.0)
 
-            return result
+    # Pass log so off-hours uses event time, not system clock
+    ctx_mult = _context_multiplier(now, log)
 
-    # ─────────────────────────
-    # Risk Classification
-    # ─────────────────────────
-    if event_id in CRITICAL_RISK:
-
-        result.update({
-            "is_suspicious": True,
-            "risk_level": "Critical"
-        })
-
-    elif event_id in HIGH_RISK:
-
-        result.update({
-            "is_suspicious": True,
-            "risk_level": "High"
-        })
-
-    elif event_id in MEDIUM_RISK:
-
-        result.update({
-            "is_suspicious": True,
-            "risk_level": "Medium"
-        })
-
-    elif event_id in LOW_RISK:
-
-        result.update({
-            "is_suspicious": True,
-            "risk_level": "Low"
-        })
-
-    return result
+    return {
+        **base,
+        **best,
+        "context_multiplier":   ctx_mult,
+        "allowlist_multiplier": al_mult,
+    }

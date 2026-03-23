@@ -3,6 +3,7 @@ import win32evtlogutil
 import logging
 import ipaddress
 import json
+import re
 from datetime import datetime
 
 logger = logging.getLogger("ids.reader")
@@ -83,70 +84,91 @@ def read_all_logs(after_records=None):
     return all_logs
 
 
-def read_logs(channel, after_record=0):
+def read_logs(channel, after_record=0, lookback_minutes=45):
     """
     Reads events from ONE channel.
-
+    
     Args:
-        channel:      "Security" / "Application" / "System"
-        after_record: only read events newer than this record number
-
-    Returns:
-        List of log dictionaries
+        channel:          "Security" / "Application" / "System"
+        after_record:      only read events newer than this record number (higher priority)
+        lookback_minutes:  if after_record is 0, read events from the last X minutes
     """
     logs = []
+    now = datetime.now()
+    log_handle = None
 
     try:
-        # Open connection to Windows Event Log
-        log = win32evtlog.OpenEventLog("localhost", channel)
+        log_handle = win32evtlog.OpenEventLog("localhost", channel)
         
-        # Get the oldest and newest record numbers
-        oldest = win32evtlog.GetOldestEventLogRecord(log)
-        newest = win32evtlog.GetNumberOfEventLogRecords(log) + oldest - 1
-        
-        # If we have a starting point, only read newer records
-        if after_record > 0:
-            start_pos = max(after_record + 1, oldest)
-        else:
-            start_pos = oldest
-        
-        # Read backwards from newest to avoid duplicates
+        # Flags for reading: Start from the newest and go backwards
+        # We stop when we hit after_record OR exceed lookback_minutes
         flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        events = win32evtlog.ReadEventLog(log, flags, start_pos)
         
-        for event in events:
-            record_id = event.RecordNumber
-            event_id = event.EventID & 0xFFFF
-            inserts = list(event.StringInserts) if event.StringInserts else []
+        is_first_event = True
+        
+        while True:
+            events = win32evtlog.ReadEventLog(log_handle, flags, 0)
+            if not events:
+                break
 
-            # Only process events newer than our last record
-            if record_id <= after_record:
-                continue
+            for event in events:
+                record_id = event.RecordNumber
+                
+                # Detect log clear: if the newest event ID in the log is smaller than our bookmark, 
+                # the log was cleared and IDs reset to 1. Reset our bookmark to capture new events.
+                if is_first_event:
+                    is_first_event = False
+                    if after_record > 0 and record_id < after_record:
+                        logger.warning(f"[{channel}] Log clear detected! Newest ID ({record_id}) < Bookmark ({after_record}). Resetting bookmark.")
+                        after_record = 0
+                
+                # ── Stop Condition 1: Bookmark reached ──
+                if after_record > 0 and record_id <= after_record:
+                    return logs
 
-            # Extract all fields
-            username = extract_username(event_id, inserts)
-            ip_address = extract_ip(event_id, inserts)
-            computer = extract_computer(event)
-            timestamp = extract_timestamp(event)
-            raw_data = extract_raw_message(event, channel, inserts)
+                # ── Stop Condition 2: Time window exceeded ──
+                # event.TimeGenerated is a pywintypes.datetime object
+                event_time = datetime.fromtimestamp(event.TimeGenerated.timestamp())
+                delta = now - event_time
+                
+                if after_record == 0 and (delta.total_seconds() / 60) > lookback_minutes:
+                    return logs
 
-            logs.append({
-                "record_id":  record_id,
-                "event_id":   event_id,
-                "channel":    channel,
-                "time":       timestamp,
-                "computer":   computer,
-                "username":   username,
-                "ip_address": ip_address,
-                "source":     event.SourceName if event.SourceName else "Unknown"
-            })
+                # ── Process Event ──
+                event_id = event.EventID & 0xFFFF
+                inserts = list(event.StringInserts) if event.StringInserts else []
+                
+                # Extract fields
+                username = extract_username(event_id, inserts)
+                ip_address = extract_ip(event_id, inserts)
+                computer = event.ComputerName
+                timestamp = event_time.strftime("%Y-%m-%d %H:%M:%S")
+                raw_data = extract_raw_message(event, channel, inserts)
 
-        win32evtlog.CloseEventLog(log)
+                logs.append({
+                    "record_id":  record_id,
+                    "event_id":   event_id,
+                    "channel":    channel,
+                    "time":       timestamp,
+                    "computer":   computer,
+                    "username":   username,
+                    "ip_address": ip_address,
+                    "source":     event.SourceName if event.SourceName else "Unknown",
+                    "message":    raw_data
+                })
 
     except Exception as e:
-        logger.error(f"[READER ERROR] {channel}: {e}", exc_info=True)
+        logger.error(f"[READER ERROR] {channel}: {e}")
+    finally:
+        # Always close event log handle to prevent OS handle leak
+        if log_handle:
+            try:
+                win32evtlog.CloseEventLog(log_handle)
+            except Exception:
+                pass
 
-    return logs
+    # Since we read backwards, we reverse to return them in chronological order
+    return logs[::-1]
 
 
 # ══════════════════════════════════════════
@@ -156,16 +178,23 @@ def read_logs(channel, after_record=0):
 def extract_computer(event):
     """
     Gets source computer name.
-    Falls back to UNKNOWN if missing.
+    Uses the actual MachineName from the event.
     """
     try:
+        # Try to get MachineName from the event
         computer = event.ComputerName
         if computer and computer.strip():
             return computer.strip()
+    except (IndexError, TypeError, ValueError, AttributeError, UnicodeError):
+        pass
+    
+    # Fallback to local hostname if event doesn't have ComputerName
+    try:
+        import socket
+        return socket.gethostname()
     except:
         pass
-
-    logger.warning("Computer name missing — using UNKNOWN")
+    
     return "UNKNOWN"
 
 
@@ -178,7 +207,7 @@ def extract_timestamp(event):
         ts = str(event.TimeGenerated)
         if ts and ts.strip():
             return ts.strip()
-    except:
+    except (IndexError, TypeError, ValueError, AttributeError, UnicodeError):
         pass
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -204,10 +233,10 @@ def extract_username(event_id, inserts):
                 and username not in SKIP_USERNAMES
                 and not username.endswith("$")
                 and not username.startswith("\\")
-                and "T" not in username[:10]):  # skip timestamp-like values
+                and not re.match(r'\d{4}-\d{2}-\d{2}T', username)):  # skip ISO timestamp values
             return username
 
-    except:
+    except (IndexError, TypeError, ValueError, AttributeError, UnicodeError):
         pass
 
     return "N/A"
@@ -216,13 +245,11 @@ def extract_username(event_id, inserts):
 def extract_ip(event_id, inserts):
     """
     Gets IP address from event.
-
-    Priority:
-    1. Known position for this EventID
-    2. Scan all values for valid IP
-    3. Host-Based Event (if local event)
-    4. Non-Network Event (if no IP found)
+    Hardened with regex scanner fallback.
     """
+    import re
+    ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
+    
     try:
         # Events that never have IP
         if event_id in NO_IP_EVENTS:
@@ -231,25 +258,22 @@ def extract_ip(event_id, inserts):
         if not inserts:
             return "Non-Network Event"
 
-        # Try known exact position first
+        # 1. Try known exact position first
         if event_id in IP_POSITIONS:
             idx = IP_POSITIONS[event_id]
             if idx < len(inserts):
                 ip_val = inserts[idx].strip()
-                if ip_val and ip_val not in ("-", "::1", "127.0.0.1", ""):
+                if ip_val and ip_val not in ("-", "::1", "127.0.0.1", "0.0.0.0", ""):
                     return ip_val
-            return "Host-Based Event"
 
-        # Fallback — scan all values for valid IP
+        # 2. Fallback: Scan ALL inserts for a valid IP pattern
         for part in inserts:
-            part = part.strip()
-            if part and part[0].isdigit() and part.count(".") == 3:
-                try:
-                    ip = ipaddress.ip_address(part)
-                    if str(ip) not in ("127.0.0.1", "0.0.0.0"):
-                        return str(ip)
-                except ValueError:
-                    pass
+            part = str(part).strip()
+            match = re.search(ip_pattern, part)
+            if match:
+                ip_candidate = match.group(0)
+                if ip_candidate not in ("127.0.0.1", "0.0.0.0"):
+                    return ip_candidate
 
     except Exception as e:
         logger.debug(f"Error extracting IP: {e}")
@@ -266,13 +290,13 @@ def extract_raw_message(event, channel, inserts):
         raw_text = win32evtlogutil.SafeFormatMessage(event, channel)
         if raw_text and raw_text.strip():
             return raw_text.strip()
-    except:
+    except (IndexError, TypeError, ValueError, AttributeError, UnicodeError):
         pass
 
     # Fallback to raw inserts
     try:
         return json.dumps(inserts) if inserts else "N/A"
-    except:
+    except (IndexError, TypeError, ValueError, AttributeError, UnicodeError):
         pass
 
     return "N/A"

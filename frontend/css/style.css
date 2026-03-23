@@ -14,7 +14,7 @@
     --sidebar-bg: #0f1629;
     --sidebar-width: 240px;
     --sidebar-collapsed: 70px;
-    --header-height: 60px;
+    --header-height: 68px;
     --content-padding: 24px;
 
     --accent-blue: #3b82f6;
@@ -29,6 +29,11 @@
     --glass-bg: rgba(17, 24, 39, 0.7);
     --glass-border: rgba(255, 255, 255, 0.06);
     --card-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+}
+
+/* Native selects, scrollbars, etc. follow dark UI (helps option lists on Windows/Chrome) */
+html[data-bs-theme="dark"] {
+    color-scheme: dark;
 }
 
 /* ── Global ──────────────────────────────── */
@@ -150,13 +155,83 @@ body {
 
 /* ── Top Header ──────────────────────────── */
 .top-header {
-    height: var(--header-height);
-    padding: 0 var(--content-padding);
+    min-height: var(--header-height);
+    padding: 12px var(--content-padding);
     background: var(--sidebar-bg);
     border-bottom: 1px solid var(--glass-border);
     position: sticky;
     top: 0;
     z-index: 1030;
+    overflow: visible;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    row-gap: 12px;
+    column-gap: 16px;
+}
+
+/* lg+: true optical center — equal side tracks so brand stays centered in the bar */
+@media (min-width: 992px) {
+    .top-header {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        column-gap: 20px;
+        row-gap: 0;
+        flex-wrap: nowrap;
+        padding-top: 14px;
+        padding-bottom: 14px;
+    }
+
+    .top-header .header-left {
+        justify-self: start;
+        min-width: 0;
+    }
+
+    .top-header .header-brand {
+        justify-self: center;
+        grid-column: 2;
+        max-width: min(100%, 52vw);
+    }
+
+    .top-header .header-right {
+        justify-self: end;
+        grid-column: 3;
+        flex-wrap: nowrap;
+        overflow: visible;
+    }
+}
+
+.header-brand-inner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.header-brand-icon {
+    font-size: 1.85rem;
+    line-height: 1;
+    flex-shrink: 0;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+}
+
+.header-brand-text {
+    min-width: 0;
+    font-size: clamp(1rem, 1.35vw, 1.25rem);
+    font-weight: 700;
+    line-height: 1.2;
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: 0.4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .header-title {
@@ -182,9 +257,107 @@ body {
     color: var(--accent-blue);
 }
 
+/* Dashboard scope (matches device dropdown) — one horizontal line, no word-wrap */
+.header-scope-badge {
+    display: flex !important;
+    flex-direction: row;
+    flex-wrap: nowrap !important;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    max-width: min(360px, 38vw);
+    white-space: nowrap;
+}
+
+.header-scope-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap !important;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.header-scope-label {
+    flex-shrink: 0;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+    line-height: 1;
+}
+
+.header-scope-value {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #f8fafc !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap !important;
+    word-break: keep-all;
+}
+
 .badge-live {
     color: var(--color-low) !important;
     border-color: rgba(34, 197, 94, 0.2) !important;
+}
+
+/* Device selector — dark list + dark text (fixes white dropdown + invisible options on Windows/Chrome) */
+.top-header .header-right {
+    overflow: visible;
+}
+
+.header-device-select-wrap {
+    overflow: visible !important;
+    position: relative;
+    z-index: 20;
+    background: rgba(30, 41, 59, 0.85) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+select.device-selector-select,
+select#device-selector {
+    min-width: 188px;
+    padding-top: 0.45rem;
+    padding-bottom: 0.45rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #f1f5f9 !important;
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    /* Prefer dark native popup where supported (Chrome, Edge, Firefox) */
+    color-scheme: dark;
+}
+
+select.device-selector-select:focus,
+select#device-selector:focus {
+    border-color: transparent !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35) !important;
+}
+
+select.device-selector-select option,
+select#device-selector option {
+    background-color: #0f1629;
+    color: #e2e8f0;
+    font-weight: 500;
+    padding: 0.5rem 0.75rem;
+}
+
+select.device-selector-select option:hover,
+select.device-selector-select option:focus,
+select.device-selector-select option:checked,
+select#device-selector option:hover,
+select#device-selector option:focus,
+select#device-selector option:checked {
+    background-color: #1e3a5f;
+    color: #fff;
 }
 
 /* ── Page Sections ───────────────────────── */
@@ -318,6 +491,15 @@ body {
     color: var(--color-low);
 }
 
+.stat-info .stat-icon {
+    background: rgba(59, 130, 246, 0.18);
+    color: var(--color-info);
+}
+
+.stat-info .stat-value {
+    color: #60a5fa;
+}
+
 /* Clickable stat cards */
 .clickable-card {
     cursor: pointer;
@@ -371,13 +553,19 @@ body {
 }
 
 .table thead th {
-    font-weight: 600;
+    font-weight: 800;
     text-transform: uppercase;
-    font-size: 0.72rem;
-    letter-spacing: 0.5px;
-    color: #64748b !important;
-    border-bottom: 1px solid var(--glass-border) !important;
-    padding: 12px;
+    font-size: 0.76rem;
+    letter-spacing: 0.06em;
+    color: #e2e8f0 !important;
+    border-bottom: 2px solid rgba(59, 130, 246, 0.35) !important;
+    padding: 14px 12px;
+    vertical-align: middle;
+    /* Opaque header row — transparent th was painting over first tbody row (overlap) */
+    background-color: #0f1629 !important;
+    background-clip: padding-box;
+    position: relative;
+    z-index: 1;
 }
 
 .table-dark {
@@ -389,9 +577,8 @@ body {
     transition: background 0.15s ease;
 }
 
-/* Remove white background from all table elements */
+/* Transparent body only — never clear thead (breaks layout / overlap with backdrop-filter) */
 .table,
-.table th,
 .table td,
 .table-striped tbody tr:nth-of-type(odd) {
     background: transparent !important;
@@ -426,20 +613,91 @@ body {
 }
 
 /* Table column widths for better visibility */
-#alerts-table th:nth-child(1) { width: 80px; }  /* Event ID */
-#alerts-table th:nth-child(2) { width: 90px; }  /* Severity */
-#alerts-table th:nth-child(3) { width: 90px; }  /* Risk Score */
-#alerts-table th:nth-child(4) { width: 300px; } /* Description */
-#alerts-table th:nth-child(5) { width: 120px; } /* Username */
-#alerts-table th:nth-child(6) { width: 120px; } /* IP Address */
-#alerts-table th:nth-child(7) { width: 90px; }  /* Channel */
-#alerts-table th:nth-child(8) { width: 100px; } /* Source */
-#alerts-table th:nth-child(9) { width: 120px; } /* Computer */
-#alerts-table th:nth-child(10) { width: 140px; } /* Time */
+#alerts-table th:nth-child(1) {
+    width: 80px;
+}
+
+/* Event ID */
+#alerts-table th:nth-child(2) {
+    width: 90px;
+}
+
+/* Severity */
+#alerts-table th:nth-child(3) {
+    width: 90px;
+}
+
+/* Risk Score */
+#alerts-table th:nth-child(4) {
+    width: 300px;
+}
+
+/* Description */
+#alerts-table th:nth-child(5) {
+    width: 300px;
+}
+
+#alerts-table td:nth-child(5) {
+    padding-left: 2px !important;
+}
+
+/* Username */
+#alerts-table th:nth-child(6) {
+    width: 120px;
+}
+
+/* IP Address */
+#alerts-table th:nth-child(7) {
+    width: 90px;
+}
+
+/* Channel */
+#alerts-table th:nth-child(8) {
+    width: 100px;
+}
+
+/* Source */
+#alerts-table th:nth-child(9) {
+    width: 120px;
+}
+
+/* Computer */
+#alerts-table th:nth-child(10) {
+    width: 140px;
+}
+
+/* Time */
 
 /* Ensure table doesn't overflow */
 .table-responsive {
     overflow-x: auto;
+}
+
+/* Same scrolling model as Alerts: grow with content, use window scroll (no short nested pane) */
+.table-responsive-page {
+    max-height: none !important;
+    overflow-y: visible;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    isolation: isolate;
+}
+
+.table-responsive-page .table {
+    border-collapse: collapse;
+    border-spacing: 0;
+    width: 100%;
+}
+
+/* Extra separation for thead inside glass cards (Chrome + backdrop-filter) */
+.table-responsive-page .table thead th {
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+}
+
+/* Dashboard recent table — event time column */
+.dashboard-ts {
+    font-variant-numeric: tabular-nums;
+    color: #94a3b8;
+    font-weight: 500;
 }
 
 /* Severity row coloring */

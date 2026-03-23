@@ -23,7 +23,7 @@ except ImportError:
 
 # Notification Controls
 email_lock = threading.Lock()
-last_notifications = defaultdict(datetime)
+last_notifications = defaultdict(lambda: datetime.min)
 
 def send_critical_alert(alert_data):
     """

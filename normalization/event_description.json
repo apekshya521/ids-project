@@ -20,7 +20,7 @@
   "142": "Task scheduler disabled task",
   "200": "Scheduled task executed",
   "201": "Scheduled task completed",
-  "256": "Application event notification",
+  "256": "Garbage collection for extensions on file thread is complete",
   "325": "Task scheduler launch request queued for task",
   "326": "Task scheduler created task process",
   "1000": "Application Error (Windows Error Reporting)",
